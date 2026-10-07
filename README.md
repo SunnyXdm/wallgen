@@ -23,8 +23,8 @@ in your browser, downloadable up to 8K. Free, no login, no tracking.
 
 ## Features
 
-- **Nine scenes** — smoke, blobs, waves, hills and pines, wave, dunes, mountains, arcs, and scribble.
-- **Four textures** — grid, dots, 8×8 Bayer ordered dithering, or smooth gradients.
+- **Ten scenes** — mist, smoke, blobs, waves, hills and pines, wave, dunes, mountains, arcs, and scribble.
+- **Five textures** — grid, dots, soft dots (LED-matrix style: gaps darken the local color), 8×8 Bayer ordered dithering, or smooth gradients.
 - **Your colors** — curated palettes or fully custom colors, with light and dark backgrounds.
 - **Reproducible and shareable** — generation is seeded (mulberry32) and the URL always mirrors the full configuration, so any wallpaper can be recreated or shared by link.
 - **Up to 8K** — export PNG at HD, Full HD, QHD, 4K, 5K, or 8K, for desktop and phone.
