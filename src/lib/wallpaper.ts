@@ -1,6 +1,7 @@
-export type Pattern = "grid" | "dots" | "bayer" | "smooth"
+export type Pattern = "grid" | "dots" | "softdots" | "bayer" | "smooth"
 
 export type Scene =
+  | "mist"
   | "smoke"
   | "blobs"
   | "flow"
@@ -12,6 +13,7 @@ export type Scene =
   | "scribble"
 
 export const SCENES: { value: Scene; label: string }[] = [
+  { value: "mist", label: "Mist (soft)" },
   { value: "smoke", label: "Smoke (soft)" },
   { value: "blobs", label: "Blobs (soft)" },
   { value: "flow", label: "Waves (soft)" },
@@ -31,6 +33,7 @@ export interface Palette {
 }
 
 export const PALETTES: Palette[] = [
+  { name: "Lagoon", darkBg: "#03161a", lightBg: "#e3eeec", colors: ["#06262c", "#0f4f5c", "#4a8088", "#c4ddd9"] },
   { name: "Deep Teal", darkBg: "#0a1417", lightBg: "#dfe7e6", colors: ["#16323a", "#3c6b70", "#a9bfbc", "#517d80"] },
   { name: "Midnight", darkBg: "#0b0b12", lightBg: "#e6e4ee", colors: ["#232345", "#4b4b8f", "#8f8fc9", "#2e2e5e"] },
   { name: "Ember", darkBg: "#120a08", lightBg: "#f3e4dd", colors: ["#4a1f14", "#a84b2f", "#e08d5a", "#712d1c"] },
@@ -208,7 +211,40 @@ function softField(cfg: WallpaperConfig, w: number, h: number): HTMLCanvasElemen
   lctx.fillStyle = cfg.bg
   lctx.fillRect(0, 0, gw, gh)
 
-  if (cfg.scene === "smoke") {
+  if (cfg.scene === "mist") {
+    // broad, soft fog banks over a vertical dark→light ramp: low-frequency fbm
+    // with a gentle warp, stretched horizontally so the clouds lie in banks
+    const stops = rampStops(cfg)
+    const ns = (cfg.seed % 1013) * 0.917
+    const tilt = (rand() < 0.5 ? -1 : 1) * (0.25 + rand() * 0.3)
+    const freq = 0.9 + rand() * 0.4 + cfg.blobs * 0.05
+    const ox = rand() * 10
+    const oy = rand() * 10
+    const img = lctx.createImageData(gw, gh)
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        const px = x / gh
+        const py = y / gh
+        const qx = fbm2(px * freq + ox, py * freq * 1.4 + oy, 3, ns)
+        const qy = fbm2(px * freq + ox + 5.2, py * freq * 1.4 + oy + 1.3, 3, ns + 7)
+        const v = fbm2(px * freq + 1.6 * qx, py * freq * 1.4 + 1.6 * qy, 3, ns + 13)
+        // gentle enough slope that the cloud banks stay visible in the light
+        // end instead of saturating to a flat color
+        const base = 1.3 * (y / gh) - 0.26 + tilt * (x / gw - 0.5)
+        // 3-octave fbm averages ~0.44, so centre there to keep the ramp honest
+        // clouds strengthen toward the bottom so the dark top stays calm
+        const amp = 0.7 + 1.4 * (y / gh)
+        const t = Math.max(0, Math.min(1, base + (v - 0.44) * amp))
+        const [r, g, b] = rampRgb(stops, t)
+        const i = (y * gw + x) * 4
+        img.data[i] = r
+        img.data[i + 1] = g
+        img.data[i + 2] = b
+        img.data[i + 3] = 255
+      }
+    }
+    lctx.putImageData(img, 0, 0)
+  } else if (cfg.scene === "smoke") {
     // domain-warped fbm over a vertical dark→light bias: wispy smoke tendrils
     const stops = rampStops(cfg)
     const ns = (cfg.seed % 1013) * 0.917
@@ -491,7 +527,7 @@ function drawScribble(s: SceneCtx) {
 }
 
 function renderScene(cfg: WallpaperConfig, w: number, h: number): HTMLCanvasElement {
-  if (cfg.scene === "smoke" || cfg.scene === "blobs" || cfg.scene === "flow")
+  if (cfg.scene === "mist" || cfg.scene === "smoke" || cfg.scene === "blobs" || cfg.scene === "flow")
     return softField(cfg, w, h)
 
   const c = makeCanvas(w, h)
@@ -571,6 +607,24 @@ export function renderWallpaper(
     sctx.putImageData(img, 0, 0)
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(small, 0, 0, w, h)
+  } else if (cfg.pattern === "softdots") {
+    // LED-matrix dots: the gaps darken the local color by a fixed ratio
+    // instead of using one gap color, so the grid fades out in the shadows and
+    // reads gently in the highlights (a translucent black tile = multiply).
+    // The tile is drawn at the final cell size: downscaling a big tile smears
+    // the gap into the dot and darkens the whole image.
+    ctx.drawImage(grad, 0, 0)
+    const cellpx = Math.max(2, Math.round(cfg.cell * scale))
+    const tile = makeCanvas(cellpx, cellpx)
+    const tctx = tile.getContext("2d")!
+    tctx.fillStyle = "rgba(0,0,0,0.32)"
+    tctx.fillRect(0, 0, cellpx, cellpx)
+    tctx.globalCompositeOperation = "destination-out"
+    tctx.beginPath()
+    tctx.arc(cellpx / 2, cellpx / 2, cellpx * 0.44, 0, Math.PI * 2)
+    tctx.fill()
+    ctx.fillStyle = ctx.createPattern(tile, "repeat")!
+    ctx.fillRect(0, 0, w, h)
   } else {
     // grid / dots: gradient with a repeating mask tile on top. The tile is
     // authored at high res and scaled via pattern transform, so gap
