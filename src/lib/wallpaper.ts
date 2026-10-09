@@ -12,17 +12,18 @@ export type Scene =
   | "arcs"
   | "scribble"
 
-export const SCENES: { value: Scene; label: string }[] = [
-  { value: "mist", label: "Mist (soft)" },
-  { value: "smoke", label: "Smoke (soft)" },
-  { value: "blobs", label: "Blobs (soft)" },
-  { value: "flow", label: "Waves (soft)" },
-  { value: "hills", label: "Hills & pines" },
-  { value: "wave", label: "Wave" },
-  { value: "dunes", label: "Dunes" },
-  { value: "mountains", label: "Mountains" },
-  { value: "arcs", label: "Arcs" },
-  { value: "scribble", label: "Scribble" },
+/** ids are part of shared URLs and must stay stable; labels are free to change */
+export const SCENES: { value: Scene; label: string; group: "soft" | "shapes" }[] = [
+  { value: "mist", label: "Mist", group: "soft" },
+  { value: "smoke", label: "Smoke", group: "soft" },
+  { value: "blobs", label: "Blobs", group: "soft" },
+  { value: "flow", label: "Flow", group: "soft" },
+  { value: "hills", label: "Hills & pines", group: "shapes" },
+  { value: "wave", label: "Swell", group: "shapes" },
+  { value: "dunes", label: "Dunes", group: "shapes" },
+  { value: "mountains", label: "Mountains", group: "shapes" },
+  { value: "arcs", label: "Arcs", group: "shapes" },
+  { value: "scribble", label: "Scribble", group: "shapes" },
 ]
 
 export interface Palette {
@@ -60,7 +61,7 @@ export interface WallpaperConfig {
   grain: number
 }
 
-/** landscape dimensions; portrait swaps w/h */
+/** legacy `res=` URL index (landscape sizes, portrait swapped w/h); outputs now live in output.ts */
 export const RESOLUTIONS = [
   { name: "HD", w: 1280, h: 720 },
   { name: "Full HD", w: 1920, h: 1080 },
@@ -575,22 +576,33 @@ const BAYER8 = [
   [63, 31, 55, 23, 61, 29, 53, 21],
 ]
 
+/** the texture pitch, in output pixels, of a w-pixel-wide render — what the PNG actually uses */
+export const exportCellPx = (cell: number, w: number) => Math.max(2, Math.round((cell * w) / 1080))
+
+export interface RenderOptions {
+  /** texture pitch in px at this canvas size (may be fractional); default `exportCellPx(cfg.cell, w)` */
+  cellPx?: number
+  /** run the grain pass (default true); previews apply it after downscaling instead */
+  grain?: boolean
+}
+
 export function renderWallpaper(
   target: HTMLCanvasElement,
   cfg: WallpaperConfig,
   w: number,
-  h: number
+  h: number,
+  opts: RenderOptions = {}
 ) {
   target.width = w
   target.height = h
   const ctx = target.getContext("2d")!
-  const scale = w / 1080
+  const cellpx = opts.cellPx ?? exportCellPx(cfg.cell, w)
   const grad = renderScene(cfg, w, h)
 
   if (cfg.pattern === "smooth") {
     ctx.drawImage(grad, 0, 0)
   } else if (cfg.pattern === "bayer") {
-    const px = Math.max(2, Math.round(cfg.cell * scale))
+    const px = cellpx
     const pw = Math.max(1, Math.round(w / px))
     const ph = Math.max(1, Math.round(h / px))
     const small = makeCanvas(pw, ph)
@@ -621,16 +633,19 @@ export function renderWallpaper(
     // The tile is drawn at the final cell size: downscaling a big tile smears
     // the gap into the dot and darkens the whole image.
     ctx.drawImage(grad, 0, 0)
-    const cellpx = Math.max(2, Math.round(cfg.cell * scale))
-    const tile = makeCanvas(cellpx, cellpx)
+    // fractional pitches (previews only) draw an integer tile and scale it
+    const size = Math.max(2, Math.ceil(cellpx))
+    const tile = makeCanvas(size, size)
     const tctx = tile.getContext("2d")!
     tctx.fillStyle = "rgba(0,0,0,0.32)"
-    tctx.fillRect(0, 0, cellpx, cellpx)
+    tctx.fillRect(0, 0, size, size)
     tctx.globalCompositeOperation = "destination-out"
     tctx.beginPath()
-    tctx.arc(cellpx / 2, cellpx / 2, cellpx * 0.44, 0, Math.PI * 2)
+    tctx.arc(size / 2, size / 2, size * 0.44, 0, Math.PI * 2)
     tctx.fill()
-    ctx.fillStyle = ctx.createPattern(tile, "repeat")!
+    const pat = ctx.createPattern(tile, "repeat")!
+    if (size !== cellpx) pat.setTransform(new DOMMatrix().scale(cellpx / size))
+    ctx.fillStyle = pat
     ctx.fillRect(0, 0, w, h)
   } else {
     // grid / dots: gradient with a repeating mask tile on top. The tile is
@@ -653,43 +668,95 @@ export function renderWallpaper(
       tctx.fillRect(gap / 2, gap / 2, TILE - gap, TILE - gap)
     }
     // integer cell size — fractional tiles beat against the pixel grid (moiré)
-    const cellpx = Math.max(2, Math.round(cfg.cell * scale))
     const pat = ctx.createPattern(tile, "repeat")!
     pat.setTransform(new DOMMatrix().scale(cellpx / TILE))
     ctx.fillStyle = pat
     ctx.fillRect(0, 0, w, h)
   }
 
-  if (cfg.grain > 0) {
-    const rand = mulberry32(cfg.seed ^ 0x9e3779b9)
-    const tile = makeCanvas(128, 128)
-    const tctx = tile.getContext("2d")!
-    const img = tctx.createImageData(128, 128)
-    for (let i = 0; i < img.data.length; i += 4) {
-      const v = Math.floor(rand() * 256)
-      img.data[i] = img.data[i + 1] = img.data[i + 2] = v
-      img.data[i + 3] = 255
-    }
-    tctx.putImageData(img, 0, 0)
-    ctx.globalAlpha = cfg.grain * 0.35
-    ctx.globalCompositeOperation = "overlay"
-    ctx.fillStyle = ctx.createPattern(tile, "repeat")!
-    ctx.fillRect(0, 0, w, h)
-    ctx.globalAlpha = 1
-    ctx.globalCompositeOperation = "source-over"
-  }
+  if (opts.grain !== false) applyGrain(ctx, cfg, w, h)
 }
 
-export async function downloadPNG(cfg: WallpaperConfig, w: number, h: number) {
-  const c = makeCanvas(w, h)
-  renderWallpaper(c, cfg, w, h)
-  const blob = await new Promise<Blob>((res, rej) =>
-    c.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png")
-  )
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `wallgen-${cfg.scene}-${cfg.seed}-${w}x${h}.png`
-  a.click()
-  URL.revokeObjectURL(url)
+/**
+ * Film grain: per-pixel noise (a seeded 128px tile, overlay-blended), so it is
+ * defined in output pixels. Previews apply it at display resolution, which is
+ * how a native-resolution wallpaper reads on a screen.
+ */
+export function applyGrain(ctx: CanvasRenderingContext2D, cfg: WallpaperConfig, w: number, h: number) {
+  if (cfg.grain <= 0) return
+  const rand = mulberry32(cfg.seed ^ 0x9e3779b9)
+  const tile = makeCanvas(128, 128)
+  const tctx = tile.getContext("2d")!
+  const img = tctx.createImageData(128, 128)
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.floor(rand() * 256)
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v
+    img.data[i + 3] = 255
+  }
+  tctx.putImageData(img, 0, 0)
+  ctx.globalAlpha = cfg.grain * 0.35
+  ctx.globalCompositeOperation = "overlay"
+  ctx.fillStyle = ctx.createPattern(tile, "repeat")!
+  ctx.fillRect(0, 0, w, h)
+  ctx.globalAlpha = 1
+  ctx.globalCompositeOperation = "source-over"
+}
+
+/** pixel budget for one supersampled preview render */
+const PREVIEW_BUDGET = 6_000_000
+
+/**
+ * Draw a w×h (device pixel) preview of an outW×outH export so the texture
+ * reads like the download scaled to fit: the scene and texture are rendered in
+ * export proportions at an integer texture pitch, supersampled when the pitch
+ * is small on screen, then filtered down (no CSS downscaling, so no moiré).
+ * `draft` skips the supersample for fast feedback while dragging.
+ */
+export function renderPreview(
+  target: HTMLCanvasElement,
+  cfg: WallpaperConfig,
+  outW: number,
+  outH: number,
+  w: number,
+  h: number,
+  draft = false
+) {
+  const cellOut = exportCellPx(cfg.cell, outW)
+  const shown = (cellOut * w) / outW // texture pitch on screen, in device px
+  if (draft || cfg.pattern === "smooth") {
+    renderWallpaper(target, cfg, w, h, { cellPx: shown })
+    return
+  }
+  // an integer pitch m at a render width ≥ 1–2× the display, never past export size
+  let m = Math.max(2, Math.ceil(shown * (shown < 8 ? 2 : 1)))
+  let rw = Math.round((m * outW) / cellOut)
+  while (m > 2 && rw * ((rw * outH) / outW) > PREVIEW_BUDGET) rw = Math.round((--m * outW) / cellOut)
+  let cellPx = m
+  if (rw >= outW) {
+    rw = outW
+    cellPx = cellOut
+  }
+  const rh = Math.max(1, Math.round((rw * outH) / outW))
+  if (rw === w && rh === h) {
+    renderWallpaper(target, cfg, w, h, { cellPx })
+    return
+  }
+  let src = makeCanvas(rw, rh)
+  renderWallpaper(src, cfg, rw, rh, { cellPx, grain: false })
+  // halve until within 2× so each step averages its pixels (a box filter)
+  while (src.width >= w * 2 && src.height >= h * 2) {
+    const half = makeCanvas(Math.round(src.width / 2), Math.round(src.height / 2))
+    const hctx = half.getContext("2d")!
+    hctx.imageSmoothingEnabled = true
+    hctx.imageSmoothingQuality = "high"
+    hctx.drawImage(src, 0, 0, half.width, half.height)
+    src = half
+  }
+  target.width = w
+  target.height = h
+  const ctx = target.getContext("2d")!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = "high"
+  ctx.drawImage(src, 0, 0, w, h)
+  applyGrain(ctx, cfg, w, h)
 }

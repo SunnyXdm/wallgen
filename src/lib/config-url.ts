@@ -3,6 +3,15 @@
 // (og:image / meta), so a shared link previews exactly what it opens to.
 // Plain .ts with explicit extensions so Node can run it via type stripping.
 import {
+  DEFAULT_OUTPUT,
+  isPortrait,
+  legacyOutput,
+  legacyResIndex,
+  outputFrom,
+  parseSize,
+  type OutputSpec,
+} from "./output.ts"
+import {
   PALETTES,
   RESOLUTIONS,
   SCENES,
@@ -15,11 +24,22 @@ export const PATTERNS: { value: Pattern; label: string }[] = [
   { value: "grid", label: "Grid" },
   { value: "dots", label: "Dots" },
   { value: "softdots", label: "Soft dots" },
-  { value: "bayer", label: "Bayer dither" },
-  { value: "smooth", label: "None" },
+  { value: "bayer", label: "Dither" },
+  { value: "smooth", label: "Smooth" },
 ]
 
-/** every key the app writes into the URL */
+/**
+ * URL schema history — old links must keep opening the same look:
+ *   v1 (no `ver`): `res` = index into RESOLUTIONS, both orientations offered;
+ *       `pal` = palette, even when `colors` were edited.
+ *   v2 (`ver=2`): `size` = WxH + `device` = preset id replace `res`; `pal` is
+ *       written only while the colors match it, `base` names the palette that
+ *       custom colors started from.
+ * Readers accept both; writers emit v2.
+ */
+export const URL_VERSION = 2
+
+/** every key the app writes into the URL (plus legacy `res`, still read) */
 export const CONFIG_KEYS = [
   "scene",
   "pattern",
@@ -31,6 +51,10 @@ export const CONFIG_KEYS = [
   "grain",
   "dark",
   "pal",
+  "base",
+  "size",
+  "device",
+  "ver",
   "res",
 ] as const
 
@@ -39,9 +63,11 @@ export const DEFAULT_SEED = 20260716
 export interface UrlState {
   cfg: WallpaperConfig
   dark: boolean
+  /** the named palette, or the one custom colors are based on */
   paletteName: string
-  /** index into RESOLUTIONS */
+  /** legacy index into RESOLUTIONS, derived from `output` (3 = 4K when it isn't one) */
   res: number
+  output: OutputSpec
 }
 
 const hexParam = (v: string | null) => (v && /^[0-9a-f]{6}$/i.test(v) ? `#${v}` : null)
@@ -64,9 +90,8 @@ export function parseConfig(params: URLSearchParams): UrlState {
   const seed = Number.isFinite(seedN) && seedN !== 0 ? seedN : DEFAULT_SEED
 
   const dark = params.get("dark") === null ? true : params.get("dark") !== "0"
-  const paletteName = PALETTES.some((p) => p.name === params.get("pal"))
-    ? (params.get("pal") as string)
-    : PALETTES[0].name
+  const named = (v: string | null) => (PALETTES.some((p) => p.name === v) ? v : null)
+  const paletteName = named(params.get("pal")) ?? named(params.get("base")) ?? PALETTES[0].name
   const p = PALETTES.find((p) => p.name === paletteName)!
   const paramColors = params.get("colors")?.split(",").map(hexParam)
   const colors =
@@ -75,10 +100,19 @@ export function parseConfig(params: URLSearchParams): UrlState {
       : [...p.colors]
   const bg = hexParam(params.get("bg")) ?? (dark ? p.darkBg : p.lightBg)
 
+  const size = parseSize(params.get("size"))
+  const legacyRes = intParam(params.get("res"), 0, RESOLUTIONS.length - 1)
+  const output = size
+    ? outputFrom(size, params.get("device"))
+    : legacyRes !== null
+      ? legacyOutput(legacyRes)
+      : { ...DEFAULT_OUTPUT }
+
   return {
     dark,
     paletteName,
-    res: intParam(params.get("res"), 0, RESOLUTIONS.length - 1) ?? 3,
+    res: legacyResIndex(output),
+    output,
     cfg: {
       seed,
       scene,
@@ -92,9 +126,22 @@ export function parseConfig(params: URLSearchParams): UrlState {
   }
 }
 
+/** do the colors still equal the named palette (in either background tone)? */
+export function matchesPalette(cfg: WallpaperConfig, paletteName: string): boolean {
+  const p = PALETTES.find((p) => p.name === paletteName)
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+  return Boolean(
+    p &&
+      (same(cfg.bg, p.darkBg) || same(cfg.bg, p.lightBg)) &&
+      cfg.colors.length === p.colors.length &&
+      cfg.colors.every((c, i) => same(c, p.colors[i]))
+  )
+}
+
 /** URL form of a state — the same keys and encoding the app keeps in the address bar */
 export function stateToParams(s: UrlState): URLSearchParams {
   const { cfg } = s
+  const custom = !matchesPalette(cfg, s.paletteName)
   return new URLSearchParams({
     scene: cfg.scene,
     pattern: cfg.pattern,
@@ -105,8 +152,11 @@ export function stateToParams(s: UrlState): URLSearchParams {
     blobs: String(cfg.blobs),
     grain: String(Math.round(cfg.grain * 100)),
     dark: s.dark ? "1" : "0",
-    pal: s.paletteName,
-    res: String(s.res),
+    // custom colors aren't the palette any more; keep where they came from
+    [custom ? "base" : "pal"]: s.paletteName,
+    size: `${s.output.w}x${s.output.h}`,
+    device: s.output.preset,
+    ver: String(URL_VERSION),
   })
 }
 
@@ -114,8 +164,8 @@ export function stateToParams(s: UrlState): URLSearchParams {
  * Canonical key for the rendered image: only what changes pixels, in a fixed
  * order, so equivalent URLs share one cache entry.
  */
-export function renderKey(cfg: WallpaperConfig): string {
-  return new URLSearchParams({
+export function renderKey(cfg: WallpaperConfig, output?: OutputSpec): string {
+  const key = new URLSearchParams({
     scene: cfg.scene,
     pattern: cfg.pattern,
     seed: String(cfg.seed),
@@ -124,7 +174,11 @@ export function renderKey(cfg: WallpaperConfig): string {
     cell: String(cfg.cell),
     blobs: String(cfg.blobs),
     grain: String(Math.round(cfg.grain * 100)),
-  }).toString()
+  })
+  // portrait outputs get a different card composition (see server/og.ts);
+  // landscape ones keep the v1 key, so existing cached cards stay valid
+  if (output && isPortrait(output)) key.set("size", `${output.w}x${output.h}`)
+  return key.toString()
 }
 
 const sceneName = (scene: Scene) =>
@@ -135,15 +189,10 @@ const patternName = (pattern: Pattern) =>
 
 /** palette name, or "Custom" once the colors no longer match it */
 function paletteLabel(s: UrlState): string {
-  const p = PALETTES.find((p) => p.name === s.paletteName)
-  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
-  const matches =
-    p &&
-    (same(s.cfg.bg, p.darkBg) || same(s.cfg.bg, p.lightBg)) &&
-    s.cfg.colors.length === p.colors.length &&
-    s.cfg.colors.every((c, i) => same(c, p.colors[i]))
-  return matches ? p.name : "Custom"
+  return matchesPalette(s.cfg, s.paletteName) ? s.paletteName : "Custom"
 }
+
+const DEVICE_NOUN: Record<string, string> = { phone: "phone ", tablet: "tablet ", desktop: "" }
 
 /** human summary used for the page title and link previews */
 export function describe(s: UrlState): { title: string; description: string } {
@@ -156,7 +205,7 @@ export function describe(s: UrlState): { title: string; description: string } {
   return {
     title: `${scene} · ${pattern} · ${palette} — wallgen`,
     description:
-      `A ${s.dark ? "dark" : "light"} ${scene.toLowerCase()} wallpaper with ${texture} in ${colors}. ` +
+      `A ${s.dark ? "dark" : "light"} ${scene.toLowerCase()} ${DEVICE_NOUN[s.output.kind] ?? ""}wallpaper with ${texture} in ${colors}. ` +
       "Open to tweak it and download up to 8K — free, no login.",
   }
 }

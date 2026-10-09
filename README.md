@@ -23,11 +23,15 @@ in your browser, downloadable up to 8K. Free, no login, no tracking.
 
 ## Features
 
-- **Ten scenes** — mist, smoke, blobs, waves, hills and pines, wave, dunes, mountains, arcs, and scribble.
-- **Five textures** — grid, dots, soft dots (LED-matrix style: gaps darken the local color), 8×8 Bayer ordered dithering, or smooth gradients.
+- **Curated looks** — eight finished starting points (Lagoon mist, Pine ridge, Paper peaks…), plus Surprise me.
+- **Ten scenes** — soft (mist, smoke, blobs, flow) and shapes (hills and pines, swell, dunes, mountains, arcs, scribble).
+- **Five textures** — grid, dots, soft dots (LED-matrix style: gaps darken the local color), 8×8 Bayer ordered dither, or smooth gradients.
 - **Your colors** — curated palettes or fully custom colors, with light and dark backgrounds.
 - **Reproducible and shareable** — generation is seeded (mulberry32) and the URL always mirrors the full configuration, so any wallpaper can be recreated or shared by link.
-- **Up to 8K** — export PNG at HD, Full HD, QHD, 4K, 5K, or 8K, for desktop and phone.
+- **Made for your screen** — pick a phone (modern 19.5:9 and 20:9 sizes), desktop (16:9 up to 8K, 16:10, ultrawide), tablet, a custom size, or an estimate of the screen you're on; the preview, download and shared link all use that one size.
+- **Trustworthy preview** — rendered at your display's pixel density with the export's texture pitch, plus an Actual pixels view of the real PNG.
+- **Undo everything** — every look, slider drag and color session is one undo step (⌘Z / ⌘⇧Z).
+- **Never blocks** — previews, thumbnails and exports (up to 8K) render in a Web Worker with OffscreenCanvas.
 - **Fully client-side** — wallpapers render in your browser, with no accounts and no analytics; nothing you make leaves your machine unless you share its link.
 - **Rich link previews** — a shared link unfurls in WhatsApp, iMessage, Telegram, Discord, Slack and X with that exact wallpaper as its preview image.
 

@@ -52,7 +52,7 @@ export function checkImageQuery(rawQuery: string): string | null {
 }
 
 export function imageUrl(origin: string, state: UrlState, format: OgFormat): string {
-  return `${origin}/og.${format}?v=${RENDER_VERSION}&${renderKey(state.cfg)}`
+  return `${origin}/og.${format}?v=${RENDER_VERSION}&${renderKey(state.cfg, state.output)}`
 }
 
 export interface Meta {

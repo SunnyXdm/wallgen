@@ -21,7 +21,7 @@ COPY --from=deps /deps/package.json ./
 COPY --from=deps /deps/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY server/index.ts server/og.ts server/preview.ts ./server/
-COPY src/lib/wallpaper.ts src/lib/config-url.ts ./src/lib/
+COPY src/lib/wallpaper.ts src/lib/config-url.ts src/lib/output.ts ./src/lib/
 # fail the build, not the container, if the prebuilt Skia binary can't load here
 RUN node -e "import('@napi-rs/canvas').then((m) => m.createCanvas(2, 2).encodeSync('png'))"
 USER node

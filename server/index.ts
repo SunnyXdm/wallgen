@@ -126,8 +126,8 @@ async function sendImage(req: IncomingMessage, res: ServerResponse, format: OgFo
   const problem = checkImageQuery(rawQuery)
   if (problem) return sendText(res, 400, problem)
 
-  const { cfg } = parseConfig(new URLSearchParams(rawQuery))
-  const key = `${format}:${renderKey(cfg)}`
+  const { cfg, output } = parseConfig(new URLSearchParams(rawQuery))
+  const key = `${format}:${renderKey(cfg, output)}`
   let body = cache.get(key)
   const hit = Boolean(body)
   if (!body) {
@@ -136,7 +136,7 @@ async function sendImage(req: IncomingMessage, res: ServerResponse, format: OgFo
       if (!rate.take(clientIp(req))) return sendText(res, 429, "slow down", { "Retry-After": "30" })
       job = limiter.run(async () => {
         const t = performance.now()
-        const png = await renderOg(cfg, format)
+        const png = await renderOg(cfg, format, output)
         console.log(`render ${key} ${png.length}B ${(performance.now() - t).toFixed(0)}ms`)
         return png
       })

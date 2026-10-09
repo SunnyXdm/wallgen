@@ -1,7 +1,8 @@
 // Server-side wallpaper rendering for link previews: the same renderer as the
 // app (src/lib/wallpaper.ts), backed by @napi-rs/canvas (Skia, like Chrome).
-import { createCanvas, DOMMatrix } from "@napi-rs/canvas"
-import { renderWallpaper, setCanvasFactory } from "../src/lib/wallpaper.ts"
+import { createCanvas, DOMMatrix, type Canvas } from "@napi-rs/canvas"
+import { isPortrait, type OutputSpec } from "../src/lib/output.ts"
+import { renderPreview, renderWallpaper, setCanvasFactory } from "../src/lib/wallpaper.ts"
 import type { WallpaperConfig } from "../src/lib/wallpaper.ts"
 
 // wallpaper.ts reaches for document.createElement and the DOMMatrix global
@@ -19,9 +20,47 @@ const JPEG_BUDGET = 280 * 1024
 
 export const MIME: Record<OgFormat, string> = { png: "image/png", jpg: "image/jpeg" }
 
-export async function renderOg(cfg: WallpaperConfig, format: OgFormat): Promise<Buffer> {
+/**
+ * Portrait outputs compose differently from a wide card, so the card shows the
+ * actual phone/tablet composition centered over a dimmed wide render of the
+ * same look. Centered, it survives the square crops some apps apply.
+ */
+function drawPortraitCard(canvas: Canvas, cfg: WallpaperConfig, out: OutputSpec) {
+  const ctx = canvas.getContext("2d")
+  ctx.fillStyle = "rgba(0,0,0,0.55)"
+  ctx.fillRect(0, 0, OG_W, OG_H)
+  const ph = OG_H - 2 * 44
+  const pw = Math.round((ph * out.w) / out.h)
+  const panel = createCanvas(pw, ph)
+  renderPreview(panel as unknown as HTMLCanvasElement, cfg, out.w, out.h, pw, ph)
+  const x = Math.round((OG_W - pw) / 2)
+  const r = Math.round(pw * 0.09)
+  ctx.save()
+  ctx.shadowColor = "rgba(0,0,0,0.6)"
+  ctx.shadowBlur = 40
+  ctx.shadowOffsetY = 12
+  ctx.beginPath()
+  ctx.roundRect(x, 44, pw, ph, r)
+  ctx.fillStyle = cfg.bg
+  ctx.fill()
+  ctx.restore()
+  ctx.save()
+  ctx.beginPath()
+  ctx.roundRect(x, 44, pw, ph, r)
+  ctx.clip()
+  ctx.drawImage(panel, x, 44)
+  ctx.restore()
+  ctx.strokeStyle = "rgba(255,255,255,0.14)"
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.roundRect(x + 1, 45, pw - 2, ph - 2, r)
+  ctx.stroke()
+}
+
+export async function renderOg(cfg: WallpaperConfig, format: OgFormat, output?: OutputSpec): Promise<Buffer> {
   const canvas = createCanvas(OG_W, OG_H)
   renderWallpaper(canvas as unknown as HTMLCanvasElement, cfg, OG_W, OG_H)
+  if (output && isPortrait(output)) drawPortraitCard(canvas, cfg, output)
   // encode runs on libuv's pool, so only the (few ms) draw blocks the loop
   if (format === "png") return canvas.encode("png")
   // WhatsApp silently drops preview images much over ~300KB, and heavy grain

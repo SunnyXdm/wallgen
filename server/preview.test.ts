@@ -163,3 +163,34 @@ test("RateLimiter: burst then refill", () => {
   assert.equal(r.take("other", 0), true)
   assert.equal(r.take("ip", 1000), true)
 })
+
+test("parseConfig: legacy res maps to its 16:9 desktop size; v2 size/device win", () => {
+  assert.deepEqual(parseConfig(q("res=5")).output, { kind: "desktop", preset: "uhd8k", w: 7680, h: 4320 })
+  assert.deepEqual(parseConfig(q("")).output, { kind: "desktop", preset: "uhd4k", w: 3840, h: 2160 })
+  const s = parseConfig(q("res=1&size=1179x2556&device=iphone"))
+  assert.deepEqual(s.output, { kind: "phone", preset: "iphone", w: 1179, h: 2556 })
+  assert.equal(s.res, 3) // not a legacy size
+  // a preset id that doesn't match the size, or an absurd size, can't sneak through
+  assert.equal(parseConfig(q("size=1000x2000&device=iphone")).output.preset, "custom")
+  assert.equal(parseConfig(q("size=99999x1")).output.preset, "uhd4k")
+  assert.equal(parseConfig(q("size=8192x8192")).output.preset, "uhd4k") // over the pixel cap
+})
+
+test("stateToParams: custom colors drop pal but keep their base palette", () => {
+  const s = parseConfig(q("scene=mist&pal=Lagoon&colors=ff0000,00ff00&size=1080x2400&device=android"))
+  const p = stateToParams(s)
+  assert.equal(p.get("pal"), null)
+  assert.equal(p.get("base"), "Lagoon")
+  assert.equal(p.get("ver"), "2")
+  assert.deepEqual(parseConfig(p), s)
+  assert.equal(stateToParams(parseConfig(q("pal=Ember"))).get("pal"), "Ember")
+})
+
+test("portrait outputs get their own card; landscape keeps the v1 image URL", () => {
+  const legacy = metaFor(q("scene=mist&pattern=softdots&pal=Lagoon&cell=11&seed=7"), ORIGIN, "jpg")
+  assert.ok(!legacy.image.includes("size="))
+  const phone = metaFor(q("scene=mist&size=1179x2556&device=iphone"), ORIGIN, "jpg")
+  assert.match(phone.image, /&size=1179x2556$/)
+  assert.equal(checkImageQuery(new URL(phone.image).search.slice(1)), null)
+  assert.match(phone.description, /^A dark mist phone wallpaper/)
+})
