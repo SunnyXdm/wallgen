@@ -193,8 +193,15 @@ function fbm2(x: number, y: number, octaves: number, seed: number): number {
   return v
 }
 
+let createCanvas = (): HTMLCanvasElement => document.createElement("canvas")
+
+/** swap the canvas source, e.g. for server-side rendering with @napi-rs/canvas */
+export function setCanvasFactory(fn: () => HTMLCanvasElement) {
+  createCanvas = fn
+}
+
 function makeCanvas(w: number, h: number): HTMLCanvasElement {
-  const c = document.createElement("canvas")
+  const c = createCanvas()
   c.width = w
   c.height = h
   return c

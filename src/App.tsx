@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { cn } from "@/lib/utils"
+import { parseConfig, PATTERNS } from "@/lib/config-url"
 import {
   downloadPNG,
   PALETTES,
@@ -21,14 +22,6 @@ import {
   type Scene,
   type WallpaperConfig,
 } from "@/lib/wallpaper"
-
-const PATTERNS: { value: Pattern; label: string }[] = [
-  { value: "grid", label: "Grid" },
-  { value: "dots", label: "Dots" },
-  { value: "softdots", label: "Soft dots" },
-  { value: "bayer", label: "Bayer dither" },
-  { value: "smooth", label: "None" },
-]
 
 function randomConfig(): { cfg: WallpaperConfig; dark: boolean; paletteName: string } {
   const r = Math.random
@@ -54,34 +47,13 @@ function randomConfig(): { cfg: WallpaperConfig; dark: boolean; paletteName: str
 // copied/shared link reproduces the exact wallpaper. ?random = randomized start.
 const params = new URLSearchParams(window.location.search)
 const initRandom = params.has("random") ? randomConfig() : null
-const initPattern = PATTERNS.some((p) => p.value === params.get("pattern"))
-  ? (params.get("pattern") as Pattern)
-  : "grid"
-const initScene = SCENES.some((s) => s.value === params.get("scene"))
-  ? (params.get("scene") as Scene)
-  : "smoke"
-const initSeed = Number(params.get("seed")) || 20260716
-
-const hexParam = (v: string | null) => (v && /^[0-9a-f]{6}$/i.test(v) ? `#${v}` : null)
-const intParam = (v: string | null, min: number, max: number) => {
-  const n = Number(v)
-  return v !== null && Number.isFinite(n) && n >= min && n <= max ? Math.round(n) : null
-}
-const initDark = params.get("dark") === null ? true : params.get("dark") !== "0"
-const initPaletteName = PALETTES.some((p) => p.name === params.get("pal"))
-  ? (params.get("pal") as string)
-  : PALETTES[0].name
-const initP = PALETTES.find((p) => p.name === initPaletteName)!
-const paramColors = params.get("colors")?.split(",").map(hexParam)
-const initColors =
-  paramColors && paramColors.length > 0 && paramColors.every(Boolean)
-    ? (paramColors as string[])
-    : [...initP.colors]
-const initBg = hexParam(params.get("bg")) ?? (initDark ? initP.darkBg : initP.lightBg)
-const initCell = intParam(params.get("cell"), 2, 12) ?? 8
-const initBlobs = intParam(params.get("blobs"), 2, 8) ?? 5
-const initGrain = (intParam(params.get("grain"), 0, 100) ?? 15) / 100
-const initRes = intParam(params.get("res"), 0, RESOLUTIONS.length - 1) ?? 3
+// parsing is shared with the link-preview server (src/lib/config-url.ts)
+const {
+  cfg: initCfg,
+  dark: initDark,
+  paletteName: initPaletteName,
+  res: initRes,
+} = parseConfig(params)
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
@@ -220,16 +192,7 @@ export default function App() {
   const [exporting, setExporting] = useState<"portrait" | "landscape" | null>(null)
   const [copied, setCopied] = useState(false)
   const [cfg, setCfg] = useState<WallpaperConfig>(
-    initRandom?.cfg ?? {
-      seed: initSeed,
-      scene: initScene,
-      pattern: initPattern,
-      bg: initBg,
-      colors: initColors,
-      cell: initCell,
-      blobs: initBlobs,
-      grain: initGrain,
-    }
+    initRandom?.cfg ?? initCfg
   )
   const res = RESOLUTIONS[resIdx]
   const portraitGhostRef = useRef<HTMLCanvasElement>(null)
